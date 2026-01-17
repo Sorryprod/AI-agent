@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  ai-browser:
+    build: .
+    container_name: ai_browser_agent
+    ports:
+      - "8000:8000"
+    volumes:
+      # Сохраняем сессию браузера между перезапусками контейнера
+      - ./browser_session:/app/browser_session
+      # Монтируем код, чтобы можно было править без пересборки (опционально)
+      - ./agent:/app/agent
+      - ./extension:/app/extension
+      - ./server.py:/app/server.py
+      - ./config.py:/app/config.py
+    env_file:
+      - .env
+    environment:
+      - HEADLESS=True  # В Docker браузер должен быть невидимым
+    restart: unless-stopped

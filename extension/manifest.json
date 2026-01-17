@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "AI Browser Agent",
+  "version": "1.0",
+  "description": "AI Copilot Control Panel",
+  "permissions": ["sidePanel"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "action": {
+    "default_title": "Open Copilot"
+  },
+  "icons": {
+    "16": "icon.png", 
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

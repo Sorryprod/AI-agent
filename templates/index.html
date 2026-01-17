@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Browser Copilot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        
+        /* Стили скроллбара */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+        /* Анимации */
+        .message-enter { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .typing-dot { animation: bounce 1.4s infinite ease-in-out both; }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden bg-slate-900">
+
+    <!-- Верхняя панель -->
+    <header class="bg-slate-800/80 backdrop-blur border-b border-slate-700 p-4 flex justify-between items-center z-10 shadow-lg">
+        <div class="flex items-center gap-3">
+            <div class="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)] animate-pulse"></div>
+            <div>
+                <h1 class="font-bold text-lg tracking-tight text-white">Browser Copilot</h1>
+                <p class="text-xs text-slate-400">Браузер активен • Можно работать вручную</p>
+            </div>
+        </div>
+        <div id="connectionStatus" class="text-xs px-2 py-1 rounded bg-slate-700 text-slate-300">
+            Connecting...
+        </div>
+    </header>
+
+    <!-- Область чата -->
+    <main id="chatContainer" class="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth">
+        <!-- Приветственное сообщение -->
+        <div class="flex gap-3 max-w-[80%]">
+            <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 text-xs">AI</div>
+            <div class="bg-slate-800 p-3 rounded-2xl rounded-tl-none border border-slate-700 shadow-sm">
+                <p class="text-sm text-slate-200">
+                    Привет! Браузер открыт. Ты можешь пользоваться им как обычно.<br><br>
+                    Если лень кликать самому — просто напиши мне задачу здесь, и я перехвачу управление.
+                </p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Индикатор печати (скрыт по умолчанию) -->
+    <div id="typingIndicator" class="hidden px-4 pb-2 text-slate-500 text-xs flex items-center gap-1">
+        <span>AI думает</span>
+        <div class="flex gap-1 ml-1">
+            <div class="w-1.5 h-1.5 bg-slate-500 rounded-full typing-dot"></div>
+            <div class="w-1.5 h-1.5 bg-slate-500 rounded-full typing-dot"></div>
+            <div class="w-1.5 h-1.5 bg-slate-500 rounded-full typing-dot"></div>
+        </div>
+    </div>
+
+    <!-- Панель ввода -->
+    <footer class="p-4 bg-slate-800/50 backdrop-blur border-t border-slate-700">
+        <div class="relative flex gap-2 max-w-4xl mx-auto">
+            <input type="text" id="taskInput" 
+                   placeholder="Например: Закажи бургер в Яндекс Лавке..." 
+                   class="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition shadow-inner"
+                   autocomplete="off">
+            
+            <button onclick="handleSend()" id="sendBtn"
+                    class="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl transition shadow-lg active:scale-95 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                </svg>
+            </button>
+
+            <button onclick="handleStop()" id="stopBtn" disabled
+                    class="bg-red-500/20 hover:bg-red-500/40 text-red-400 border border-red-500/30 p-3 rounded-xl transition disabled:hidden">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
+                </svg>
+            </button>
+        </div>
+    </footer>
+
+    <script>
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+        const chatContainer = document.getElementById("chatContainer");
+        const taskInput = document.getElementById("taskInput");
+        const sendBtn = document.getElementById("sendBtn");
+        const stopBtn = document.getElementById("stopBtn");
+        const typingIndicator = document.getElementById("typingIndicator");
+        const statusEl = document.getElementById("connectionStatus");
+
+        let isProcessing = false;
+
+        ws.onopen = () => {
+            statusEl.textContent = "Online";
+            statusEl.className = "text-xs px-2 py-1 rounded bg-green-900/50 text-green-400 border border-green-800";
+        };
+
+        ws.onclose = () => {
+            statusEl.textContent = "Offline";
+            statusEl.className = "text-xs px-2 py-1 rounded bg-red-900/50 text-red-400 border border-red-800";
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            processMessage(data);
+        };
+
+        function processMessage(data) {
+            // Скрываем индикатор печати при любом сообщении
+            typingIndicator.classList.add("hidden");
+
+            if (data.type === 'thought') {
+                // Мысли агента показываем серым курсивом
+                addMessage(data.message, 'thought');
+            } else if (data.type === 'tool') {
+                // Действие инструмента
+                addMessage(data.message, 'tool');
+                typingIndicator.classList.remove("hidden"); // Агент работает
+            } else if (data.type === 'result') {
+                // Результат действия - обновляем последний элемент или добавляем маленький статус
+                // Для чистоты интерфейса можно не спамить результатами в чат, 
+                // а только если ошибка
+                if (data.message.includes('❌') || data.message.includes('Error')) {
+                    addMessage(data.message, 'error');
+                } 
+            } else if (data.type === 'success') {
+                addMessage(data.message, 'success');
+                setIdleState();
+            } else if (data.type === 'error') {
+                addMessage(data.message, 'error');
+                setIdleState();
+            } else if (data.type === 'system') {
+                addMessage(data.message, 'system');
+            }
+        }
+
+        function addMessage(text, type) {
+            const div = document.createElement("div");
+            div.className = "flex gap-3 max-w-[90%] message-enter mb-2";
+
+            let bgColor = "bg-slate-800";
+            let textColor = "text-slate-200";
+            let borderColor = "border-slate-700";
+            let icon = "AI";
+            let iconColor = "bg-blue-600";
+
+            if (type === 'user') {
+                div.className += " ml-auto flex-row-reverse";
+                bgColor = "bg-blue-600";
+                borderColor = "border-blue-500";
+                icon = "You";
+                iconColor = "bg-slate-700";
+            } else if (type === 'thought') {
+                bgColor = "bg-slate-800/50";
+                textColor = "text-slate-400 italic text-sm";
+                borderColor = "border-transparent";
+                icon = "💭";
+                iconColor = "bg-gray-700";
+            } else if (type === 'tool') {
+                bgColor = "bg-slate-900";
+                textColor = "text-blue-300 font-mono text-sm border-l-2 border-blue-500 pl-2";
+                borderColor = "border-transparent";
+                // Убираем иконку для инструментов для компактности
+                div.innerHTML = `<div class="${bgColor} p-2 rounded w-full ${textColor}">${text}</div>`;
+                chatContainer.appendChild(div);
+                scrollToBottom();
+                return;
+            } else if (type === 'success') {
+                bgColor = "bg-green-900/20";
+                textColor = "text-green-300";
+                borderColor = "border-green-800";
+                icon = "🏁";
+                iconColor = "bg-green-800";
+            } else if (type === 'error') {
+                bgColor = "bg-red-900/20";
+                textColor = "text-red-300";
+                borderColor = "border-red-800";
+                icon = "⚠️";
+                iconColor = "bg-red-800";
+            }
+
+            const iconHtml = `<div class="w-8 h-8 rounded-full ${iconColor} flex items-center justify-center flex-shrink-0 text-xs shadow-md">${icon}</div>`;
+            const contentHtml = `
+                <div class="${bgColor} p-3 rounded-2xl ${type === 'user' ? 'rounded-tr-none' : 'rounded-tl-none'} border ${borderColor} shadow-sm">
+                    <p class="${textColor}">${text}</p>
+                </div>
+            `;
+
+            div.innerHTML = type === 'user' ? contentHtml + iconHtml : iconHtml + contentHtml;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function handleSend() {
+            const text = taskInput.value.trim();
+            if (!text || isProcessing) return;
+
+            addMessage(text, 'user');
+            ws.send(JSON.stringify({command: "start", task: text}));
+            
+            taskInput.value = "";
+            setProcessingState();
+        }
+
+        function handleStop() {
+            ws.send(JSON.stringify({command: "stop"}));
+            addMessage("Останавливаю...", 'system');
+            // Состояние сбросится когда придет подтверждение или ошибка
+        }
+
+        function setProcessingState() {
+            isProcessing = true;
+            sendBtn.disabled = true;
+            stopBtn.style.display = "block";
+            stopBtn.disabled = false;
+            taskInput.disabled = true;
+            typingIndicator.classList.remove("hidden");
+        }
+
+        function setIdleState() {
+            isProcessing = false;
+            sendBtn.disabled = false;
+            stopBtn.style.display = "none";
+            taskInput.disabled = false;
+            taskInput.focus();
+            typingIndicator.classList.add("hidden");
+        }
+
+        taskInput.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") handleSend();
+        });
+
+    </script>
+</body>
+</html>

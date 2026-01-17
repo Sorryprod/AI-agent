@@ -1,4 +1,5 @@
 .env
 /venv
 /browser_session
-/__pycache__
+**/__pycache__
+.md
