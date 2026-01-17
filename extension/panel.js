@@ -7,6 +7,7 @@ const sendBtn = document.getElementById('send-btn');
 const stopBtn = document.getElementById('stop-btn');
 const pauseBtn = document.getElementById('pause-btn');
 const clearBtn = document.getElementById('clear-btn');
+const taskControls = document.getElementById('task-controls');
 const statusDot = document.getElementById('status-dot');
 const typing = document.getElementById('typing');
 const welcome = document.getElementById('welcome');
@@ -43,8 +44,7 @@ function connect() {
         if (data.type === 'status') {
             if (data.is_running) setBusyState();
             else setIdleState();
-            // Сброс паузы при переподключении, если сервер не запоминает (для простоты)
-            isPaused = false; 
+            isPaused = false;
             updatePauseUI();
             return;
         }
@@ -68,14 +68,12 @@ function connect() {
             }
         }
         else if (data.type === 'system') {
-            addMsg('system', data.message, true);
+            addMsg('tool', "⚙️ " + data.message, true);
         }
     };
 }
 
 connect();
-
-// --- ЛОГИКА КНОПОК ---
 
 function send() {
     const text = input.value.trim();
@@ -93,35 +91,32 @@ function send() {
 
 function stop() {
     ws.send(JSON.stringify({command: "stop"}));
-    addMsg('error', "Остановлено пользователем", true);
+    addMsg('error', "Остановлено", true);
     setIdleState();
 }
 
-// НОВОЕ: Логика паузы
 function togglePause() {
     isPaused = !isPaused;
     
     if (isPaused) {
         ws.send(JSON.stringify({command: "pause"}));
-        addMsg('system', "⏸️ Пауза (нажмите Play для продолжения)", true);
+        addMsg('system', "⏸️ Пауза", true);
     } else {
         ws.send(JSON.stringify({command: "resume"}));
-        addMsg('system', "▶️ Продолжаю выполнение", true);
+        addMsg('system', "▶️ Продолжаю", true);
     }
     updatePauseUI();
 }
 
 function updatePauseUI() {
     if (isPaused) {
-        pauseBtn.innerHTML = "▶️ Play";
-        pauseBtn.classList.add('active');
+        pauseBtn.innerHTML = "▶️";
         statusDot.className = 'status-dot paused';
-        showTyping(false); // Скрываем "Выполняю"
+        showTyping(false);
     } else {
-        pauseBtn.innerHTML = "⏸️ Pause";
-        pauseBtn.classList.remove('active');
-        statusDot.className = 'status-dot online';
-        if (stopBtn.style.display === 'block') showTyping(true); // Возвращаем если работаем
+        pauseBtn.innerHTML = "⏸️";
+        if (isConnected) statusDot.className = 'status-dot online';
+        if (taskControls.style.display === 'flex') showTyping(true);
     }
 }
 
@@ -130,12 +125,14 @@ function updatePauseUI() {
 function formatToolLog(text) {
     text = text.replace('🔧 ', '');
     if (text.includes('navigate')) return `🌐 Перехожу: ${text.match(/'url':\s*'([^']+)'/)?.[1] || 'сайт'}`;
-    if (text.includes('click')) return `👆 Клик: ${text.match(/'selector':\s*'([^']+)'/)?.[1].replace('text=', '') || 'элемент'}`;
+    if (text.includes('click')) {
+        let sel = text.match(/'selector':\s*'([^']+)'/)?.[1] || 'элемент';
+        return `👆 Клик: ${sel.replace('text=', '').replace(/"/g, '')}`;
+    }
     if (text.includes('type_text') || text.includes('fill')) return `✍️ Ввод: "${text.match(/'text':\s*'([^']+)'/)?.[1] || '...'}"`;
     if (text.includes('press_key')) return `↵ Enter`;
     if (text.includes('scroll')) return `📜 Скролл...`;
     if (text.includes('get_page_content')) return `👀 Смотрю на страницу...`;
-    if (text.includes('wait')) return `⏳ Жду...`;
     return "⚙️ " + text.substring(0, 40);
 }
 
@@ -159,7 +156,6 @@ function addMsg(type, text, save = false) {
     if (save) saveToStorage(type, text);
 }
 
-// --- Storage ---
 function saveToStorage(type, text) {
     let hist = JSON.parse(localStorage.getItem('chatHistory')) || [];
     if (hist.length > 50) hist.shift();
@@ -188,16 +184,17 @@ clearBtn.onclick = () => {
     if (welcome) { chat.appendChild(welcome); welcome.style.display = 'block'; }
 };
 
-// --- STATES ---
 function showTyping(show) { typing.style.display = show ? 'flex' : 'none'; }
 
 function setBusyState() {
     input.disabled = true;
-    input.placeholder = "Агент работает...";
+    input.placeholder = "Работаю...";
     sendBtn.disabled = true;
     sendBtn.style.opacity = '0.5';
-    stopBtn.style.display = 'block';
-    pauseBtn.style.display = 'block'; // Показываем паузу
+    
+    // Показываем кнопки управления
+    taskControls.style.display = 'flex';
+    
     isPaused = false;
     updatePauseUI();
 }
@@ -207,8 +204,10 @@ function setIdleState() {
     input.placeholder = "Напиши задачу...";
     sendBtn.disabled = false;
     sendBtn.style.opacity = '1';
-    stopBtn.style.display = 'none';
-    pauseBtn.style.display = 'none'; // Скрываем паузу
+    
+    // Скрываем кнопки управления
+    taskControls.style.display = 'none';
+    
     input.focus();
     showTyping(false);
     isPaused = false;
@@ -217,7 +216,7 @@ function setIdleState() {
 
 sendBtn.onclick = send;
 stopBtn.onclick = stop;
-pauseBtn.onclick = togglePause; // Хендлер паузы
+pauseBtn.onclick = togglePause;
 
 input.addEventListener('keypress', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
