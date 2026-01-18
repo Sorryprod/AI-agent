@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![AI Model](https://img.shields.io/badge/AI_Model-Gemini_2.5-flash_%2B_GPT--4o-8E75B2?style=for-the-badge&logo=google&logoColor=white)
+![AI Model](https://img.shields.io/badge/AI_Model-Gemini_2.5_%2B_GPT--4o-8E75B2?style=for-the-badge&logo=google&logoColor=white)
 ![Browser](https://img.shields.io/badge/Browser-Chromium-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Operational-2ea44f?style=for-the-badge&logo=activity&logoColor=white)
 
