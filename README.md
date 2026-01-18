@@ -37,7 +37,7 @@
 ```
 # Клонируйте репозиторий
 git clone https://github.com/Sorryprod/AI-agent.git
-cd browser-agent
+cd AI-agent
 
 # Создайте виртуальное окружение
 python -m venv venv
