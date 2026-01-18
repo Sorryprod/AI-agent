@@ -1,142 +1,134 @@
 """
-Анализатор страницы - SEMANTIC TREE (Global Fix)
-Строит иерархическую структуру страницы, чтобы агент понимал контекст
-любой кнопки на любом сайте без хардкода.
+Анализатор страницы - FULL SEMANTIC VISION
+Видит все тексты (цены, названия), а не только кнопки.
+Строит полное дерево для понимания контекста.
 """
+import os
 from playwright.async_api import Page
+from config import DEBUG_MODE
 
 class PageAnalyzer:
     def __init__(self, page: Page):
         self.page = page
 
     async def get_compact_state(self) -> str:
-        return await self.page.evaluate('''() => {
-            // Конфигурация
-            const CONFIG = {
-                maxItems: 80, // Больше элементов для контекста
-                minTextLength: 2,
-                maxTextLength: 100
-            };
+        tree = await self.page.evaluate('''() => {
+            // КОНФИГУРАЦИЯ
+            const MAX_TEXT_LEN = 100;
+            const MAX_DEPTH = 20; // Глубокая вложенность для сложных сайтов
+            let robotId = 0;
+            
+            // Чистим старые ID
+            document.querySelectorAll('[data-r-id]').forEach(el => el.removeAttribute('data-r-id'));
 
-            function cleanText(text) {
-                return (text || '').replace(/\\s+/g, ' ').trim().substring(0, CONFIG.maxTextLength);
-            }
-
+            // Проверка видимости
             function isVisible(el) {
                 const rect = el.getBoundingClientRect();
-                if (rect.width < 5 || rect.height < 5) return false;
+                if (rect.width < 1 || rect.height < 1) return false;
+                // Чуть шире экрана (на 1000px), чтобы видеть предзагруженный контент
+                if (rect.bottom < -200 || rect.top > window.innerHeight + 800) return false;
+                
                 const style = window.getComputedStyle(el);
                 return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
             }
 
-            // Оценка интерактивности элемента
-            function getElementType(el) {
-                const tag = el.tagName.toLowerCase();
-                const style = window.getComputedStyle(el);
-                const role = el.getAttribute('role');
-                
-                if (tag === 'button' || role === 'button' || style.cursor === 'pointer') return 'button';
-                if (tag === 'a') return 'link';
-                if (tag === 'input') {
-                    const type = el.type;
-                    if (['submit', 'button', 'reset'].includes(type)) return 'button';
-                    if (['checkbox', 'radio'].includes(type)) return 'option';
-                    return 'input';
-                }
-                if (tag === 'textarea' || el.isContentEditable) return 'input';
-                if (tag === 'select') return 'select';
-                return null;
+            function cleanText(text) {
+                return (text || '').replace(/\\s+/g, ' ').trim().substring(0, MAX_TEXT_LEN);
             }
 
-            // Генератор уникального селектора
-            function getSelector(el) {
-                if (el.id) return `#${CSS.escape(el.id)}`;
+            // Главная функция обхода
+            function traverse(element, depth) {
+                if (depth > MAX_DEPTH) return '';
+                if (!isVisible(element)) return '';
+
+                let output = '';
+                const tagName = element.tagName.toLowerCase();
+                const style = window.getComputedStyle(element);
                 
-                // Пробуем уникальные атрибуты данных
-                const dataAttrs = ['data-testid', 'data-test-id', 'data-qa', 'aria-label', 'name'];
-                for (let attr of dataAttrs) {
-                    if (el.hasAttribute(attr)) return `[${attr}="${el.getAttribute(attr)}"]`;
-                }
+                // 1. ОПРЕДЕЛЕНИЕ ТИПА (Интерактивный?)
+                const isClickable = (
+                    tagName === 'a' || tagName === 'button' || tagName === 'input' || 
+                    tagName === 'select' || tagName === 'textarea' ||
+                    element.getAttribute('role') === 'button' ||
+                    style.cursor === 'pointer' ||
+                    element.onclick != null
+                );
 
-                // Пробуем классы (только специфичные)
-                if (el.className && typeof el.className === 'string') {
-                    const classes = el.className.split(/\s+/).filter(c => c.length > 3 && !c.includes(':'));
-                    if (classes.length > 0) return `.${classes.join('.')}`;
-                }
-
-                return el.tagName.toLowerCase();
-            }
-
-            let items = [];
-            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-            let idCounter = 1;
-
-            while (walker.nextNode()) {
-                const el = walker.currentNode;
-                if (!isVisible(el)) continue;
-
-                const type = getElementType(el);
-                const text = cleanText(el.innerText || el.value || el.placeholder || el.getAttribute('aria-label'));
-                
-                // Логика группировки:
-                // Если элемент контейнер (div, li, article) и содержит текст, но не интерактивный -> это Контекст
-                // Если элемент интерактивный -> это Действие
-                
-                // 1. Это интерактивный элемент?
-                if (type) {
-                    let label = text;
-                    // Если текста нет, ищем внутри картинки или svg title
-                    if (!label) {
-                        const img = el.querySelector('img');
-                        if (img && img.alt) label = `[Img: ${img.alt}]`;
-                        else if (el.querySelector('svg')) label = '[Icon]';
-                        else label = '[Action]';
-                    }
-
-                    // Ищем ближайший контекст (родителя с текстом), если кнопка "пустая" (типа "+")
-                    let context = "";
-                    if (label.length < 5 || label === '[Icon]') {
-                        let parent = el.parentElement;
-                        for(let i=0; i<3; i++) { // Идем вверх на 3 уровня
-                            if (!parent) break;
-                            const pText = cleanText(parent.innerText);
-                            // Если в родителе текста больше, чем в кнопке
-                            if (pText && pText.length > label.length && pText.length < 150) {
-                                // Убираем текст самой кнопки из родителя
-                                context = ` {Context: ${pText.replace(label, '').trim()}}`;
-                                break;
-                            }
-                            parent = parent.parentElement;
+                // 2. ПОЛУЧЕНИЕ СОБСТВЕННОГО ТЕКСТА
+                // (Текст, который лежит прямо в этом элементе, а не в детях)
+                let directText = '';
+                if (element.childNodes) {
+                    Array.from(element.childNodes).forEach(node => {
+                        if (node.nodeType === Node.TEXT_NODE) {
+                            directText += node.textContent;
                         }
-                    }
-
-                    const selector = getSelector(el);
-                    
-                    // Формат: [ID] <TYPE> "Label" {Context} -> Selector
-                    // Если селектор слабый, добавляем text= для надежности
-                    let robustSelector = selector;
-                    if (!selector.includes('#') && !selector.includes('[') && label && label !== '[Icon]') {
-                        robustSelector = `text="${label}"`;
-                    }
-
-                    items.push({
-                        str: `[${idCounter}] <${type}> "${label}"${context} -> ${selector}`,
-                        score: 10
                     });
-                    el.setAttribute('data-ai-id', idCounter); // Метим элемент для точного клика по ID
-                    idCounter++;
                 }
+                directText = cleanText(directText);
                 
-                // 2. Это важный текст (заголовок, цена)?
-                else if ((el.tagName.match(/^H[1-6]$/) || el.className.includes('price') || el.className.includes('title')) && text) {
-                    items.push({
-                        str: `   --- ${text} ---`,
-                        score: 5
-                    });
+                // Атрибуты (для контекста)
+                const label = cleanText(element.getAttribute('aria-label') || element.getAttribute('title') || element.getAttribute('placeholder'));
+                const role = element.getAttribute('role');
+
+                // 3. РЕШЕНИЕ: ДОБАВЛЯТЬ ЛИ В ДЕРЕВО?
+                // Добавляем, если:
+                // - Это кнопка/ссылка (даже пустая)
+                // - Это контейнер с текстом (цена, название)
+                // - Это картинка (важно для еды)
+                
+                let shouldShow = isClickable || (directText.length > 1) || (label.length > 1) || tagName === 'img';
+
+                if (shouldShow) {
+                    const indent = '  '.repeat(depth);
+                    let line = `${indent}`;
+                    
+                    // Если можно кликнуть - даем ID
+                    if (isClickable) {
+                        robotId++;
+                        element.setAttribute('data-r-id', robotId);
+                        line += `[${robotId}] <${tagName}>`;
+                    } else {
+                        // Просто тег (для структуры)
+                        line += `<${tagName}>`;
+                    }
+
+                    // Добавляем контент
+                    if (directText) line += ` "${directText}"`;
+                    if (label) line += ` [Label: ${label}]`;
+                    if (tagName === 'img' && element.alt) line += ` [Img: ${cleanText(element.alt)}]`;
+                    
+                    output += line + '\\n';
                 }
+
+                // 4. РЕКУРСИЯ
+                // Если элемент - это просто контейнер без текста, мы не выводим его строку,
+                // но ОБЯЗАТЕЛЬНО идем внутрь искать детей.
+                // Но если мы уже вывели строку (shouldShow=true), то дети будут с отступом.
+                // Если нет (shouldShow=false), то дети будут на том же уровне (flattening),
+                // чтобы не плодить пустые <div>.
+                
+                const childDepth = shouldShow ? depth + 1 : depth;
+                
+                for (const child of element.children) {
+                    output += traverse(child, childDepth);
+                }
+
+                return output;
             }
 
-            // Сортировка и фильтрация (простая версия)
-            // Возвращаем первые N элементов
-            return [`URL: ${window.location.href}`, ...items.slice(0, CONFIG.maxItems).map(i => i.str)].join('\\n');
+            const structure = traverse(document.body, 0);
+            
+            if (!structure.trim()) return "Page seems empty (Scripts loading?). Wait...";
+            
+            return `URL: ${window.location.href}\\nSCROLL: ${window.scrollY}\\n\\n${structure}`;
         }''')
+
+        # Сохраняем дамп, чтобы ты мог проверить
+        if DEBUG_MODE:
+            try:
+                with open("debug_tree.txt", "w", encoding="utf-8") as f:
+                    f.write(tree)
+                print(f"👀 [DEBUG] Snapshot saved ({len(tree)} chars)")
+            except: pass
+
+        return tree

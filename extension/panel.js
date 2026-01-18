@@ -49,7 +49,13 @@ function connect() {
             return;
         }
 
-        if (data.type === 'tool') {
+        // --- НОВОЕ: Обработка мыслей ---
+        if (data.type === 'thought') {
+            // Удаляем старые мысли, чтобы не захламлять? Или оставляем?
+            // Оставляем, как просил пользователь.
+            addMsg('thought', data.message, false); // false = не сохранять мысли в историю (опционально)
+        }
+        else if (data.type === 'tool') {
             showTyping(true);
             const friendlyText = formatToolLog(data.message);
             addMsg('tool', friendlyText, true);
@@ -68,7 +74,7 @@ function connect() {
             }
         }
         else if (data.type === 'system') {
-            addMsg('tool', "⚙️ " + data.message, true);
+            addMsg('system', data.message, true);
         }
     };
 }
@@ -97,7 +103,6 @@ function stop() {
 
 function togglePause() {
     isPaused = !isPaused;
-    
     if (isPaused) {
         ws.send(JSON.stringify({command: "pause"}));
         addMsg('system', "⏸️ Пауза", true);
@@ -120,15 +125,10 @@ function updatePauseUI() {
     }
 }
 
-// --- ВИЗУАЛИЗАЦИЯ ---
-
 function formatToolLog(text) {
     text = text.replace('🔧 ', '');
     if (text.includes('navigate')) return `🌐 Перехожу: ${text.match(/'url':\s*'([^']+)'/)?.[1] || 'сайт'}`;
-    if (text.includes('click')) {
-        let sel = text.match(/'selector':\s*'([^']+)'/)?.[1] || 'элемент';
-        return `👆 Клик: ${sel.replace('text=', '').replace(/"/g, '')}`;
-    }
+    if (text.includes('click')) return `👆 Клик: ${text.match(/'selector':\s*'([^']+)'/)?.[1].replace('text=', '') || 'элемент'}`;
     if (text.includes('type_text') || text.includes('fill')) return `✍️ Ввод: "${text.match(/'text':\s*'([^']+)'/)?.[1] || '...'}"`;
     if (text.includes('press_key')) return `↵ Enter`;
     if (text.includes('scroll')) return `📜 Скролл...`;
@@ -136,10 +136,13 @@ function formatToolLog(text) {
     return "⚙️ " + text.substring(0, 40);
 }
 
+// --- ФУНКЦИЯ ВЫВОДА СООБЩЕНИЙ ---
 function addMsg(type, text, save = false) {
     if (welcome) welcome.style.display = 'none';
+    const chat = document.getElementById('chat');
     const lastMsg = chat.lastElementChild;
 
+    // Анти-спам ошибок
     if (type === 'error' && lastMsg && lastMsg.classList.contains('msg-error')) {
         lastMsg.textContent = text;
         if (save) updateLastInStorage(type, text);
@@ -149,14 +152,39 @@ function addMsg(type, text, save = false) {
 
     const div = document.createElement('div');
     div.className = `msg msg-${type}`;
-    div.textContent = text;
-    chat.appendChild(div);
+    
+    // --- СПЕЦЭФФЕКТ ДЛЯ МЫСЛЕЙ ---
+    if (type === 'thought') {
+        div.innerHTML = `<span style="opacity: 0.7;">🧠 Думаю:</span><br>`;
+        chat.appendChild(div);
+        
+        // Эффект печатной машинки
+        let i = 0;
+        const speed = 10; // Скорость печати
+        function typeWriter() {
+            if (i < text.length) {
+                div.innerHTML += text.charAt(i);
+                i++;
+                chat.scrollTop = chat.scrollHeight;
+                setTimeout(typeWriter, speed);
+            }
+        }
+        typeWriter();
+    } else {
+        div.textContent = text;
+        chat.appendChild(div);
+    }
+
     chat.scrollTop = chat.scrollHeight;
 
     if (save) saveToStorage(type, text);
 }
 
+// --- Storage ---
 function saveToStorage(type, text) {
+    // Мысли не сохраняем, чтобы не захламлять историю при перезагрузке
+    if (type === 'thought') return;
+    
     let hist = JSON.parse(localStorage.getItem('chatHistory')) || [];
     if (hist.length > 50) hist.shift();
     hist.push({ type, text });
@@ -164,6 +192,7 @@ function saveToStorage(type, text) {
 }
 
 function updateLastInStorage(type, text) {
+    if (type === 'thought') return;
     let hist = JSON.parse(localStorage.getItem('chatHistory')) || [];
     if (hist.length > 0) {
         hist[hist.length - 1] = { type, text };
@@ -188,13 +217,10 @@ function showTyping(show) { typing.style.display = show ? 'flex' : 'none'; }
 
 function setBusyState() {
     input.disabled = true;
-    input.placeholder = "Работаю...";
+    input.placeholder = "Агент работает...";
     sendBtn.disabled = true;
     sendBtn.style.opacity = '0.5';
-    
-    // Показываем кнопки управления
     taskControls.style.display = 'flex';
-    
     isPaused = false;
     updatePauseUI();
 }
@@ -204,10 +230,7 @@ function setIdleState() {
     input.placeholder = "Напиши задачу...";
     sendBtn.disabled = false;
     sendBtn.style.opacity = '1';
-    
-    // Скрываем кнопки управления
     taskControls.style.display = 'none';
-    
     input.focus();
     showTyping(false);
     isPaused = false;

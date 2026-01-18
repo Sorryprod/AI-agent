@@ -1,5 +1,6 @@
+*.txt
 .env
 /venv
 /browser_session
 **/__pycache__
-.md
+agent/__pycache__/**

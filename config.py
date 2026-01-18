@@ -16,3 +16,5 @@ OPENAI_MODEL = "gpt-4o"
 HEADLESS = False
 USER_DATA_DIR = "./browser_session"
 VIEWPORT = {"width": 1280, "height": 900}
+
+DEBUG_MODE = True
