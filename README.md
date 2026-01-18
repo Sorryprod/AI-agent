@@ -36,7 +36,7 @@
 
 ```
 # Клонируйте репозиторий
-git clone <ваш_репозиторий>
+git clone https://github.com/Sorryprod/AI-agent.git
 cd browser-agent
 
 # Создайте виртуальное окружение
